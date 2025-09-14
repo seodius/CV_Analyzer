@@ -12,13 +12,20 @@ def test_read_root():
 
 @patch("main.save_to_firestore")
 @patch("main.upload_to_gcs")
-@patch("main.parse_resume")
-def test_upload_resume(mock_parse_resume, mock_upload_to_gcs, mock_save_to_firestore):
+@patch("main.parse_resume_with_gemini")
+@patch("main.extract_text_from_pdf")
+def test_upload_resume(mock_extract_text, mock_parse_gemini, mock_upload_to_gcs, mock_save_to_firestore):
     # Mock the return values of the external services
-    mock_parse_resume.return_value = {
-        "name": "John Doe",
-        "email": "john.doe@example.com",
-        "skills": ["Python", "FastAPI"]
+    mock_extract_text.return_value = "This is a dummy resume."
+    mock_parse_gemini.return_value = {
+        "basics": {
+            "name": "John Doe",
+            "email": "john.doe@example.com"
+        },
+        "skills": [
+            {"name": "Python"},
+            {"name": "FastAPI"}
+        ]
     }
     mock_upload_to_gcs.return_value = "gs://cvanalyzer_resumes/dummy_resume.pdf"
     mock_save_to_firestore.return_value = "some-firestore-id"
@@ -37,8 +44,8 @@ def test_upload_resume(mock_parse_resume, mock_upload_to_gcs, mock_save_to_fires
 
     assert response.status_code == 200
     data = response.json()
-    assert data["name"] == "John Doe"
-    assert data["email"] == "john.doe@example.com"
-    assert data["skills"] == ["Python", "FastAPI"]
+    assert data["basics"]["name"] == "John Doe"
+    assert data["basics"]["email"] == "john.doe@example.com"
+    assert data["skills"][0]["name"] == "Python"
     assert "resume_uri" in data
     assert "firestore_id" in data

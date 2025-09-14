@@ -1,32 +1,21 @@
 from fastapi import FastAPI, File, UploadFile
-from pyresparser import ResumeParser
 from google.cloud import storage, firestore
 import shutil
 import os
-import nltk
-from spacy.lang.en import English
 import uuid
 import json
-
-# Download required NLTK data
-try:
-    nltk.data.find('corpora/stopwords')
-except nltk.downloader.DownloadError:
-    nltk.download('stopwords')
-try:
-    nltk.data.find('corpora/words')
-except nltk.downloader.DownloadError:
-    nltk.download('words')
-
-# Load English tokenizer, tagger, parser, NER and word vectors
-nlp = English()
-nlp.add_pipe("sentencizer")
-
+from PyPDF2 import PdfReader
+import google.generativeai as genai
 
 app = FastAPI()
 
 # GCS configuration
 BUCKET_NAME = "cvanalyzer_resumes"
+
+# Gemini configuration
+GEMINI_API_KEY = "AIzaSyAcIgafIFCorKz5bbxhuAsQWAwW3ilXeeo"
+genai.configure(api_key=GEMINI_API_KEY)
+
 
 def upload_to_gcs(file_path, file_name):
     """Uploads a file to the bucket."""
@@ -39,10 +28,40 @@ def upload_to_gcs(file_path, file_name):
     # Return the GCS URI
     return f"gs://{BUCKET_NAME}/{file_name}"
 
+def extract_text_from_pdf(file_path: str) -> str:
+    """Extracts text from a PDF file."""
+    text = ""
+    try:
+        with open(file_path, "rb") as f:
+            reader = PdfReader(f)
+            for page in reader.pages:
+                page_text = page.extract_text()
+                if page_text:
+                    text += page_text
+    except Exception as e:
+        print(f"Error extracting text from PDF: {e}")
+    return text
 
-def parse_resume(file_path):
-    data = ResumeParser(file_path).get_extracted_data()
-    return data
+def parse_resume_with_gemini(resume_text: str) -> dict:
+    """Parses resume text using the Gemini API."""
+    model = genai.GenerativeModel('gemini-pro')
+    prompt = f"""
+    You are an expert resume parser.
+    Please parse the following resume text and return it in the JSON Resume format.
+    The output should be a valid JSON object.
+    Do not include any text outside of the JSON object.
+
+    Resume text:
+    {resume_text}
+    """
+    try:
+        response = model.generate_content(prompt)
+        # The response might have ```json ... ``` markers, so we need to clean it.
+        cleaned_json = response.text.strip().replace("```json", "").replace("```", "").strip()
+        return json.loads(cleaned_json)
+    except Exception as e:
+        print(f"Error parsing with Gemini: {e}")
+        return {"error": "Failed to parse resume with Gemini."}
 
 def save_to_firestore(data):
     """Saves the parsed resume data to Firestore."""
@@ -82,14 +101,17 @@ async def create_upload_file(file: UploadFile = File(...)):
         except Exception as e:
             print(f"Error uploading to GCS: {e}")
 
+        # Extract text from PDF
+        resume_text = extract_text_from_pdf(file_path)
 
-        # Parse the resume
-        parsed_data = parse_resume(file_path)
+        # Parse with Gemini
+        parsed_data = parse_resume_with_gemini(resume_text)
+
         if gcs_uri:
             parsed_data['resume_uri'] = gcs_uri
 
         # Save to Firestore
-        if parsed_data:
+        if parsed_data and "error" not in parsed_data:
             try:
                 firestore_id = save_to_firestore(parsed_data)
                 parsed_data['firestore_id'] = firestore_id
