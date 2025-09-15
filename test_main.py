@@ -10,6 +10,7 @@ def test_read_root():
     assert response.status_code == 200
     assert response.json() == {"Hello": "World"}
 
+@patch.dict(os.environ, {"GEMINI_API_KEY": "test-key", "BUCKET_NAME": "test-bucket"})
 @patch("main.save_to_firestore")
 @patch("main.upload_to_gcs")
 @patch("main.parse_resume_with_gemini")
@@ -27,7 +28,7 @@ def test_upload_resume(mock_extract_text, mock_parse_gemini, mock_upload_to_gcs,
             {"name": "FastAPI"}
         ]
     }
-    mock_upload_to_gcs.return_value = "gs://cvanalyzer_resumes/dummy_resume.pdf"
+    mock_upload_to_gcs.return_value = "gs://test-bucket/dummy_resume.pdf"
     mock_save_to_firestore.return_value = "some-firestore-id"
 
     # Create a dummy pdf file

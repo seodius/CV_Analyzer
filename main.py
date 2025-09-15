@@ -6,15 +6,21 @@ import uuid
 import json
 from PyPDF2 import PdfReader
 import google.generativeai as genai
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = FastAPI()
 
 # GCS configuration
-BUCKET_NAME = "cvanalyzer_resumes"
+BUCKET_NAME = os.getenv("BUCKET_NAME")
 
 # Gemini configuration
-GEMINI_API_KEY = "AIzaSyAcIgafIFCorKz5bbxhuAsQWAwW3ilXeeo"
-genai.configure(api_key=GEMINI_API_KEY)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+else:
+    print("GEMINI_API_KEY not found in environment variables.")
 
 
 def upload_to_gcs(file_path, file_name):
@@ -44,6 +50,8 @@ def extract_text_from_pdf(file_path: str) -> str:
 
 def parse_resume_with_gemini(resume_text: str) -> dict:
     """Parses resume text using the Gemini API."""
+    if not GEMINI_API_KEY:
+        return {"error": "GEMINI_API_KEY not configured."}
     model = genai.GenerativeModel('gemini-pro')
     prompt = f"""
     You are an expert resume parser.
